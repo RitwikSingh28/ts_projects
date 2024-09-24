@@ -7,6 +7,10 @@ class Vector2 {
     this.y = y;
   }
 
+  static zero() : Vector2 {
+    return new Vector2(0, 0);
+  }
+
   toarray() : [number, number] {
     return [this.x, this.y];
   }
@@ -33,7 +37,7 @@ class Vector2 {
 
   norm() : Vector2 {
     let length = this.len();
-    if(length == 0) return new Vector2(0, 0);
+    if(length == 0) return Vector2.zero();
     return new Vector2(this.x/length, this.y/length);
   }
 
@@ -46,13 +50,23 @@ class Vector2 {
   }
 }
 
-const GRID_COLS = 10;
-const GRID_ROWS = 10;
-const GRID_SIZE = new Vector2(GRID_COLS, GRID_ROWS);
 const SCREEN_WIDTH = 800;
 const SCREEN_HEIGHT = 800;
 const EPS = 1e-3; // to push the coordinate a tiny bit if it is already snapped
-let SCENE = Array(GRID_ROWS).fill(0).map(() => Array(GRID_COLS).fill(0));
+
+type Scene = Array<Array<number>>;
+
+function sceneSize(scene: Scene) : Vector2 {
+  const y = scene.length;
+  let x = Number.MIN_VALUE;
+
+  for (let row of scene) {
+    x = Math.max(x, row.length);
+  }
+
+  console.log(`Screen size: ${x}, ${y}`);
+  return new Vector2(x, y);
+}
 
 function canvasSize(ctx: CanvasRenderingContext2D) : Vector2 {
   return new Vector2(ctx.canvas.width, ctx.canvas.height);
@@ -112,32 +126,38 @@ function rayStep(p1: Vector2, p2: Vector2) : Vector2 {
   return p3;
 }
 
-function grid(ctx: CanvasRenderingContext2D, p2: Vector2 | undefined) {
+function minimap(ctx: CanvasRenderingContext2D, p1: Vector2, p2: Vector2 | undefined, position: Vector2, size: Vector2, scene: Scene) {
   ctx.reset();
   ctx.fillStyle = "#181818";
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   
-  for(let y = 0; y < GRID_ROWS; ++y) {
-    for(let x = 0; x < GRID_COLS; ++x) {
-      if(SCENE[y][x] !== 0) {
+  ctx.strokeStyle = "#303030";
+
+  const gridSize = sceneSize(scene);
+
+  ctx.translate(...position.toarray());
+  ctx.scale(...size.div(gridSize).toarray());
+  ctx.lineWidth = 0.05;
+
+  for(let y = 0; y < gridSize.y; ++y) {
+    for(let x = 0; x < gridSize.x; ++x) {
+      if(scene[y][x] !== 0) {
+        ctx.beginPath();
         ctx.fillStyle = "#303030";
         ctx.fillRect(x, y, 1, 1);
+        ctx.fill();
       }
     }
   }
 
-  ctx.lineWidth = 0.05;
-  ctx.strokeStyle = "#303030";
-  ctx.scale(ctx.canvas.width / GRID_COLS, ctx.canvas.height / GRID_ROWS);
-  for(let x = 0; x <= GRID_COLS; ++x) {
-    drawLine(ctx, new Vector2(x, 0), new Vector2(x, GRID_ROWS));
+  for(let x = 0; x <= gridSize.y; ++x) {
+    drawLine(ctx, new Vector2(x, 0), new Vector2(x, gridSize.x));
   }
 
-  for(let y = 0; y <= GRID_ROWS; ++y) {
-    drawLine(ctx, new Vector2(0, y), new Vector2(GRID_COLS, y));
+  for(let y = 0; y <= gridSize.x; ++y) {
+    drawLine(ctx, new Vector2(0, y), new Vector2(gridSize.y, y));
   }
  
-  let p1 = new Vector2(GRID_COLS * 0.37, GRID_ROWS * 0.45);
   ctx.fillStyle = "magenta";
   drawCircle(ctx, p1, 0.1);
 
@@ -149,8 +169,9 @@ function grid(ctx: CanvasRenderingContext2D, p2: Vector2 | undefined) {
       drawLine(ctx, p1, p2);
 
       const c = hittingCell(p1, p2);
-      if(c.x < 0 || c.x >= GRID_SIZE.x ||
-         c.y < 0 || c.y >= GRID_SIZE.y) {
+      if(c.x < 0 || c.x >= gridSize.y ||
+         c.y < 0 || c.y >= gridSize.x ||
+         scene[c.y][c.x] === 1) {
         break;
       }
 
@@ -161,30 +182,55 @@ function grid(ctx: CanvasRenderingContext2D, p2: Vector2 | undefined) {
   }
 }
 
+class Player {
+  position: Vector2;
+  direction: number;
+
+  constructor(position: Vector2, direction: number) {
+    this.position = position;
+    this.direction = direction;
+  }
+}
+
 (() => {
-  SCENE[1][1] = 0;
+  let scene = [
+    [0, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 0, 0],
+    [1, 1, 0, 0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 0, 1, 0, 0, 0, 0],
+  ];
+
   const canvas = document.getElementById("game") as (HTMLCanvasElement  | null);
   if(canvas === null) {
     throw new Error("No canvas with id `game` found");
   }
 
-  canvas.height = SCREEN_HEIGHT;
-  canvas.width = SCREEN_WIDTH;
+  const factor = 80;
+  canvas.width = 16 * factor;
+  canvas.height = 9 * factor;
 
-  
   const ctx = canvas.getContext("2d");
   if(ctx === null) {
     throw new Error("2D context not supported in the browser");
   }
 
+  let p1 = sceneSize(scene).mul(new Vector2(0.37, 0.52));
   let p2 : Vector2 | undefined = undefined;
+  let minimapPos = Vector2.zero().add(canvasSize(ctx).scale(0.01));
+  let cellSize = ctx.canvas.width * 0.02;
+  let minimapSize = sceneSize(scene).scale(cellSize);
+
   canvas.addEventListener("mousemove", (event) => {
     p2 = new Vector2(event.offsetX, event.offsetY)
-        .div(canvasSize(ctx))
-        .mul(GRID_SIZE);
-    grid(ctx, p2);
+        .sub(minimapPos)
+        .div(minimapSize)
+        .mul(sceneSize(scene));
+    minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
   });
 
-  grid(ctx, p2);
+  minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
 })();
 
