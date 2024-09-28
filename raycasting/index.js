@@ -1,4 +1,9 @@
 "use strict";
+const SCREEN_WIDTH = 800;
+const SCREEN_HEIGHT = 800;
+const EPS = 1e-3; // to push the coordinate a tiny bit if it is already snapped
+const NEAR_CLIPPING_PLANE = 0.5;
+const FOV = Math.PI * 0.5;
 class Vector2 {
     constructor(x, y) {
         this.x = x;
@@ -6,6 +11,9 @@ class Vector2 {
     }
     static zero() {
         return new Vector2(0, 0);
+    }
+    static fromAngle(angle) {
+        return new Vector2(Math.cos(angle), Math.sin(angle));
     }
     toarray() {
         return [this.x, this.y];
@@ -37,10 +45,10 @@ class Vector2 {
     distanceTo(other) {
         return other.sub(this).len();
     }
+    rotate90() {
+        return new Vector2(-this.y, this.x);
+    }
 }
-const SCREEN_WIDTH = 800;
-const SCREEN_HEIGHT = 800;
-const EPS = 1e-3; // to push the coordinate a tiny bit if it is already snapped
 function sceneSize(scene) {
     const y = scene.length;
     let x = Number.MIN_VALUE;
@@ -102,8 +110,8 @@ function rayStep(p1, p2) {
     }
     return p3;
 }
-function minimap(ctx, p1, p2, position, size, scene) {
-    ctx.reset();
+function minimap(ctx, player, position, size, scene) {
+    ctx.save();
     ctx.fillStyle = "#181818";
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.strokeStyle = "#303030";
@@ -128,24 +136,16 @@ function minimap(ctx, p1, p2, position, size, scene) {
         drawLine(ctx, new Vector2(0, y), new Vector2(gridSize.y, y));
     }
     ctx.fillStyle = "magenta";
-    drawCircle(ctx, p1, 0.1);
-    if (p2 !== undefined) {
-        for (;;) {
-            drawCircle(ctx, p2, 0.1);
-            ctx.strokeStyle = "magenta";
-            ctx.lineWidth = 0.01;
-            drawLine(ctx, p1, p2);
-            const c = hittingCell(p1, p2);
-            if (c.x < 0 || c.x >= gridSize.y ||
-                c.y < 0 || c.y >= gridSize.x ||
-                scene[c.y][c.x] === 1) {
-                break;
-            }
-            const p3 = rayStep(p1, p2);
-            p1 = p2;
-            p2 = p3;
-        }
-    }
+    drawCircle(ctx, player.position, 0.1);
+    ctx.strokeStyle = "magenta";
+    const p = player.position.add(Vector2.fromAngle(player.direction)).scale(NEAR_CLIPPING_PLANE);
+    const l = Math.tan(FOV * 0.5) * NEAR_CLIPPING_PLANE;
+    const pl = p.add(player.position).rotate90().norm().scale(l);
+    const pr = p.sub(player.position).rotate90().norm().scale(l);
+    drawLine(ctx, player.position, p);
+    drawLine(ctx, p, pl);
+    drawLine(ctx, p, pr);
+    ctx.save();
 }
 class Player {
     constructor(position, direction) {
@@ -174,17 +174,9 @@ class Player {
     if (ctx === null) {
         throw new Error("2D context not supported in the browser");
     }
-    let p1 = sceneSize(scene).mul(new Vector2(0.37, 0.52));
-    let p2 = undefined;
-    let minimapPos = Vector2.zero().add(canvasSize(ctx).scale(0.01));
-    let cellSize = ctx.canvas.width * 0.02;
+    let player = new Player(sceneSize(scene).mul(new Vector2(0.37, 0.52)), 0);
+    let cellSize = ctx.canvas.width * 0.06;
     let minimapSize = sceneSize(scene).scale(cellSize);
-    canvas.addEventListener("mousemove", (event) => {
-        p2 = new Vector2(event.offsetX, event.offsetY)
-            .sub(minimapPos)
-            .div(minimapSize)
-            .mul(sceneSize(scene));
-        minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
-    });
-    minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
+    let minimapPos = Vector2.zero().add(canvasSize(ctx).scale(0.01));
+    minimap(ctx, player, minimapPos, minimapSize, scene);
 })();

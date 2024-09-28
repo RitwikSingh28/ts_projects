@@ -1,3 +1,9 @@
+const SCREEN_WIDTH = 800;
+const SCREEN_HEIGHT = 800;
+const EPS = 1e-3; // to push the coordinate a tiny bit if it is already snapped
+const NEAR_CLIPPING_PLANE = 0.5;
+const FOV = Math.PI * 0.5;
+
 class Vector2 {
   x: number;
   y: number;
@@ -9,6 +15,10 @@ class Vector2 {
 
   static zero() : Vector2 {
     return new Vector2(0, 0);
+  }
+
+  static fromAngle(angle: number) : Vector2 {
+    return new Vector2(Math.cos(angle), Math.sin(angle));
   }
 
   toarray() : [number, number] {
@@ -48,11 +58,12 @@ class Vector2 {
   distanceTo(other: Vector2) : number {
     return other.sub(this).len();
   }
+
+  rotate90() : Vector2 {
+    return new Vector2(-this.y, this.x);
+  }
 }
 
-const SCREEN_WIDTH = 800;
-const SCREEN_HEIGHT = 800;
-const EPS = 1e-3; // to push the coordinate a tiny bit if it is already snapped
 
 type Scene = Array<Array<number>>;
 
@@ -126,8 +137,8 @@ function rayStep(p1: Vector2, p2: Vector2) : Vector2 {
   return p3;
 }
 
-function minimap(ctx: CanvasRenderingContext2D, p1: Vector2, p2: Vector2 | undefined, position: Vector2, size: Vector2, scene: Scene) {
-  ctx.reset();
+function minimap(ctx: CanvasRenderingContext2D, player: Player, position: Vector2, size: Vector2, scene: Scene) {
+  ctx.save();
   ctx.fillStyle = "#181818";
   ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   
@@ -159,27 +170,20 @@ function minimap(ctx: CanvasRenderingContext2D, p1: Vector2, p2: Vector2 | undef
   }
  
   ctx.fillStyle = "magenta";
-  drawCircle(ctx, p1, 0.1);
+  drawCircle(ctx, player.position, 0.1);
+  ctx.strokeStyle = "magenta";
 
-  if(p2 !== undefined) {
-    for(;;) {
-      drawCircle(ctx, p2, 0.1);
-      ctx.strokeStyle = "magenta";
-      ctx.lineWidth = 0.01;
-      drawLine(ctx, p1, p2);
 
-      const c = hittingCell(p1, p2);
-      if(c.x < 0 || c.x >= gridSize.y ||
-         c.y < 0 || c.y >= gridSize.x ||
-         scene[c.y][c.x] === 1) {
-        break;
-      }
+  const p = player.position.add(Vector2.fromAngle(player.direction)).scale(NEAR_CLIPPING_PLANE);
+  const l = Math.tan(FOV*0.5)*NEAR_CLIPPING_PLANE;
+  const pl = p.add(player.position).rotate90().norm().scale(l);
+  const pr = p.sub(player.position).rotate90().norm().scale(l);
 
-      const p3 = rayStep(p1, p2);
-      p1 = p2;
-      p2 = p3;
-    }
-  }
+  drawLine(ctx, player.position, p);
+  drawLine(ctx, p, pl);
+  drawLine(ctx, p, pr);
+
+  ctx.save();
 }
 
 class Player {
@@ -217,20 +221,11 @@ class Player {
     throw new Error("2D context not supported in the browser");
   }
 
-  let p1 = sceneSize(scene).mul(new Vector2(0.37, 0.52));
-  let p2 : Vector2 | undefined = undefined;
-  let minimapPos = Vector2.zero().add(canvasSize(ctx).scale(0.01));
-  let cellSize = ctx.canvas.width * 0.02;
+  let player = new Player(sceneSize(scene).mul(new Vector2(0.37, 0.52)), 0);
+  let cellSize = ctx.canvas.width * 0.06;
   let minimapSize = sceneSize(scene).scale(cellSize);
+  let minimapPos = Vector2.zero().add(canvasSize(ctx).scale(0.01));
 
-  canvas.addEventListener("mousemove", (event) => {
-    p2 = new Vector2(event.offsetX, event.offsetY)
-        .sub(minimapPos)
-        .div(minimapSize)
-        .mul(sceneSize(scene));
-    minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
-  });
-
-  minimap(ctx, p1, p2, minimapPos, minimapSize, scene);
+  minimap(ctx, player, minimapPos, minimapSize, scene);
 })();
 
